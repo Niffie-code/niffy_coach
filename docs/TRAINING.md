@@ -16,4 +16,10 @@ To move your progress, open **Your training profile → Download backup** and tr
 
 For the original signed-in experience, choose **Open private synced coach**. It retains its own profile. To copy its saved records into Pages, sign in to the private coach, open `/api/profile` on that same site, save the JSON response, then restore it on Pages.
 
+## Automatic updates
+
+On Vercel, connect the same Lichess account under **Your training profile** on each device. The coach batches saves after five quiet seconds and checks for changes every three minutes while visible, on return to the tab, and when connectivity returns. Offline changes are retained locally for retry. Your Lichess sign-in identifies your private profile. Additional usernames only select public games to study.
+
+Under **Games → Linked Lichess accounts**, add each username once. The first check fetches up to 30 completed standard blitz and rapid games per account. Later checks request new games with a one-day overlap and deduplicate by game ID. Checks run on opening or returning to the coach and every 15 minutes while the tab is visible. Remove a username to stop future imports and retain its existing games. Closing the app pauses checks until the next visit.
+
 The importer contacts the selected chess provider directly to read the supplied public username. It requests up to 30 completed standard blitz and rapid games. The engine analyzes positions locally while the tab is open.

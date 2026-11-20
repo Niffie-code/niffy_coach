@@ -7,6 +7,10 @@ The repository name is `niffy_coach`. A GitHub project site uses the account hos
 3. In **Actions**, open **Publish Niffy Coach** and run the workflow if the push preceded Pages setup.
 4. Confirm the deployment job finished successfully. Open the URL reported by its `github-pages` environment, load a study position and play a move against Stockfish.
 
+## Vercel sync service
+
+Vercel serves `site/` with the Node handlers in `api/`. Connect a private Vercel Blob store to the production project using `BLOB_READ_WRITE_TOKEN`. Lichess OAuth uses PKCE, a host-only HTTP-only session cookie and the canonical `https://niffy-coach.vercel.app/` callback. The server verifies the account before reading or merging profile records. Use `npm ci` and `npm test` to verify the server and client behavior locally.
+
 Every push to `main` runs the checks and uploads only `site/`. No build credentials or environment variables are required. No custom domain or CNAME is configured. To roll back a release, revert its commit and publish the new head.
 
 ## Troubleshooting

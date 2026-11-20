@@ -9,11 +9,11 @@ A chess coach for returning competitors preparing for 5-minute blitz and 10-minu
 3. In **Study**, solve the four-position diagnostic or select a position from your games. For calculation drills, enter your candidate, the opponent’s reply and your continuation.
 4. Play a training game in **Practice**. **My week** tracks your schedule and unaided recall by time control.
 
-This edition saves training in the browser. Open **Your training profile** to move progress between devices or use the existing private coach for automatic sync. See the [training and data guide](docs/TRAINING.md).
+On the [Vercel coach](https://niffy-coach.vercel.app/), open **Your training profile → Connect Lichess** on each device for automatic sync. In **Games**, add one or more Lichess usernames once. The coach checks for new games as you train. GitHub Pages supports automatic game checks and local backups. See the [training and data guide](docs/TRAINING.md).
 
 ## Run locally
 
-Use Node.js 22 or newer. There are no package dependencies.
+Use Node.js 22 or newer. Run `npm ci` once to install the private cloud storage client used by Vercel.
 
 ```sh
 npm start

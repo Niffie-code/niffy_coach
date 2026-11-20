@@ -1,1 +1,1 @@
-{"name":"niffy_coach","version":"1.0.0","private":true,"type":"module","scripts":{"start":"node tools/serve.mjs","test":"node tools/check.mjs"}}
+{"name":"niffy_coach","version":"1.0.0","private":true,"type":"module","scripts":{"start":"node tools/serve.mjs","test":"node tools/check.mjs && node tools/sync-check.mjs"},"dependencies":{"@vercel/blob":"2.9.0"}}

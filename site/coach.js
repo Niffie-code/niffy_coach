@@ -37,8 +37,8 @@ function pack(id,pgn,name,format,date,opening,side){
  const b=new Chess();b.loadPgn(pgn);if(!b.history().length)return null;
  return {id,pgn,side:side||((b.getHeaders().White||'').toLowerCase()===name.toLowerCase()?'w':'b'),format,date,opening:opening||'',white:b.getHeaders().White||'White',black:b.getHeaders().Black||'Black',result:b.getHeaders().Result||'*'};
 }
-export async function importGames(site,name){
- const req=async(month='')=>{const user=encodeURIComponent(name.trim()); const url=site==='lichess'?'https://lichess.org/api/games/user/'+user+'?max=30&perfType=blitz,rapid&moves=true&opening=true&clocks=false':'https://api.chess.com/pub/player/'+user.toLowerCase()+'/games/'+(month||'archives');const res=await fetch(url,{headers:{Accept:site==='lichess'?'application/x-ndjson':'application/json'}});if(!res.ok)throw Error(res.status===429?'Game provider rate limit. Retry in a minute.':'Could not read that account. Check the username and retry.');return res;};
+export async function importGames(site,name,since=0){
+ const req=async(month='')=>{const user=encodeURIComponent(name.trim()); const url=site==='lichess'?'https://lichess.org/api/games/user/'+user+'?perfType=blitz,rapid&moves=true&opening=true&clocks=false&'+(since?'since='+since:'max=30'):'https://api.chess.com/pub/player/'+user.toLowerCase()+'/games/'+(month||'archives');const res=await fetch(url,{headers:{Accept:site==='lichess'?'application/x-ndjson':'application/json'}});if(!res.ok){const error=Error(res.status===429?'The provider asked us to wait before checking again.':'Could not read that account. Check its spelling or try again later.');error.status=res.status;error.retryAfter=Number(res.headers.get('Retry-After')||0)*1000;throw error;}return res;};
  let imported=0,found=0;
  function add(g){if(g){found++;if(!get('g:'+g.id)){put('g:'+g.id,g);imported++;}}}
  if(site==='lichess'){

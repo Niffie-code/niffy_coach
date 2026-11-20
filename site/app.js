@@ -2,6 +2,8 @@ import {Chess} from './vendor/chess.js';
 import {trainer,variation,playUci,sound} from './engine.js';
 import {put,get,list,sync} from './store.js';
 import {subjects,library,games,attempts,personal,settings,cards,ranked,lineKey,importGames,analyze} from './coach.js';
+import {accounts,checkedAt,link,unlink,startAccounts} from './linked-accounts.js';
+import {startCloud} from './cloud.js';
 const $=s=>document.querySelector(s),esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let page='',topic='',card,board,orientation='w',selected,lastMove,flight=0,busy=false,stage=0,answers=[],report='',complete=false,usedHint=false,playout=false,run=null,notice='',analysisText='',processing=false,importing=false,paused=false,diagnostic=false;
 const chosen=()=>settings().format;
@@ -45,10 +47,11 @@ function clickSquare(sq){
  if(selected){const choices=board.moves({square:selected,verbose:true}).filter(m=>m.to===sq);if(choices.length){let m=choices[0];if(choices.length>1){const choice=prompt('Promote to q, r, b, or n','q');m=choices.find(x=>x.promotion===choice?.toLowerCase());if(!m)return;}void submitMove(m);return;}}
  selected=piece?.color===board.turn()&&selected!==sq?sq:null;draw();
 }
+let accountStatus='';
 function gamesPage(){
  setHeading('Game library','Your games','Import completed games and turn critical decisions into positions you can replay.');
  const gs=games(),lines=[...new Set(gs.filter(g=>g.pgn).map(lineKey))];
- return '<div class="cols"><div class="panel"><h2>Import games</h2><form id="import"><div class="row"><label>Platform<select name="site">'+option('chesscom','Chess.com',settings().site)+option('lichess','Lichess',settings().site)+'</select></label><label>Username<input type="text" name="username" required pattern="[A-Za-z0-9_-]{1,40}" value="'+esc(settings().username||'')+'"></label></div><p><button class="primary" '+(importing?'disabled':'')+'>'+(importing?'Importing…':'Import recent games')+'</button></p></form><p role="status">'+esc(notice)+'</p></div><div class="panel"><h2>Your repertoire</h2><p class="mini">Select the lines you want to keep in opening practice.</p>'+lines.map(l=>'<label style="display:block"><input type="checkbox" data-rep="'+esc(l)+'" '+(!settings().excluded?.includes(l)?'checked':'')+'> '+esc(l)+'</label>').join('')+(!lines.length?'<p class="muted">Your lines will appear after your first game.</p>':'')+'</div></div><div class="panel"><h2>Completed games</h2><p id="analysis" role="status">'+esc(analysisText)+'</p>'+(!gs.length?'<p>Start with an online import or <a href="#practice"><u>play a timed game</u></a>.</p>':'')+gs.map(g=>'<div class="listitem"><strong>'+esc(g.white+' vs '+g.black)+'</strong><div class="mini">'+esc(g.format+' · '+new Date(g.date).toLocaleDateString()+' · '+g.result)+'</div>'+(g.critical?'<button data-card="'+esc(g.critical)+'">Review first critical decision</button>':g.analyzed?'Analysis complete':'Queued for analysis')+' <button data-replay="'+esc(g.id)+'">Replay game</button></div>').join('')+'</div>';
+ return '<div class="panel"><h2>Linked Lichess accounts</h2><p>Add each username once. New blitz and rapid games are checked while the coach is open.</p><form id="link-lichess" class="row"><label>Lichess username<input required name="handle" minlength="2" maxlength="30" autocomplete="off"></label><button class="primary">Add username</button></form>'+accounts().map(a=>'<div class="listitem">'+esc(a.name)+(checkedAt(a.name)?' · Checked '+esc(new Date(checkedAt(a.name)).toLocaleString()):'')+' <button data-unlink="'+esc(a.name)+'">Remove</button></div>').join('')+'<p id="account-status" role="status">'+esc(accountStatus)+'</p></div><div class="cols"><div class="panel"><h2>Import games</h2><form id="import"><div class="row"><label>Platform<select name="site">'+option('chesscom','Chess.com',settings().site)+option('lichess','Lichess',settings().site)+'</select></label><label>Username<input type="text" name="username" required pattern="[A-Za-z0-9_-]{1,40}" value="'+esc(settings().username||'')+'"></label></div><p><button class="primary" '+(importing?'disabled':'')+'>'+(importing?'Importing…':'Import recent games')+'</button></p></form><p role="status">'+esc(notice)+'</p></div><div class="panel"><h2>Your repertoire</h2><p class="mini">Select the lines you want to keep in opening practice.</p>'+lines.map(l=>'<label style="display:block"><input type="checkbox" data-rep="'+esc(l)+'" '+(!settings().excluded?.includes(l)?'checked':'')+'> '+esc(l)+'</label>').join('')+(!lines.length?'<p class="muted">Your lines will appear after your first game.</p>':'')+'</div></div><div class="panel"><h2>Completed games</h2><p id="analysis" role="status">'+esc(analysisText)+'</p>'+(!gs.length?'<p>Start with an online import or <a href="#practice"><u>play a timed game</u></a>.</p>':'')+gs.map(g=>'<div class="listitem"><strong>'+esc(g.white+' vs '+g.black)+'</strong><div class="mini">'+esc(g.format+' · '+new Date(g.date).toLocaleDateString()+' · '+g.result)+'</div>'+(g.critical?'<button data-card="'+esc(g.critical)+'">Review first critical decision</button>':g.analyzed?'Analysis complete':'Queued for analysis')+' <button data-replay="'+esc(g.id)+'">Replay game</button></div>').join('')+'</div>';
 }
 async function work(){if(processing||paused||run?.active)return;processing=true;try{for(const g of games().filter(g=>!g.analyzed)){if(run?.active||paused)break;await analyze(g,(i,n)=>{analysisText='Analyzing '+g.white+' vs '+g.black+' · ply '+i+' of '+n;if($('#analysis'))$('#analysis').textContent=analysisText;});if(page==='games')draw();}analysisText='';}catch(e){analysisText=e.message+' Open Games to retry.';}finally{processing=false;if(page==='games')draw();}}
 let replay=null,replayIndex=0;
@@ -91,6 +94,7 @@ function route(){
 }
 function openCard(c){if(!c)return;card=c;if(page!=='study'){location.hash='study';}else{startCard(c);draw();}}
 document.addEventListener('click',e=>{const el=e.target.closest('button');if(!el)return;const d=el.dataset;
+ if(d.unlink){unlink(d.unlink);draw();return;}
  if(d.square){if(page==='study'||page==='practice')clickSquare(d.square);return;}
  if(d.topic!==undefined){topic=d.topic;diagnostic=false;startCard(ranked(topic,chosen())[0]);draw();return;}
  if(d.card){diagnostic=false;topic='';openCard(cards().find(c=>c.id===d.card));return;}
@@ -117,9 +121,18 @@ document.addEventListener('click',e=>{const el=e.target.closest('button');if(!el
 });
 document.addEventListener('change',e=>{const el=e.target;if(el.id==='format'){pref({format:el.value});startCard(ranked(topic,chosen())[0]);draw();}if(el.id==='minutes'&&el.checkValidity()){pref({minutes:Number(el.value)});draw();}if(el.dataset.rep){const set=new Set(settings().excluded||[]);el.checked?set.delete(el.dataset.rep):set.add(el.dataset.rep);pref({excluded:[...set]});}});
 document.addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(e.target);
- if(e.target.id==='import'){if(importing)return;importing=true;const site=f.get('site'),name=f.get('username').trim();pref({site,username:name});notice='Reading completed games…';draw();try{const r=await importGames(site,name);notice=r.imported+' new games from '+r.found+' qualifying games.';}catch(error){notice=error.message;}finally{importing=false;draw();void work();}}
+ if(e.target.id==='link-lichess'){
+ const name=String(f.get('handle')).trim();
+ try{const result=link(name);accountStatus='Checking '+name+'…';draw();await result;}catch(error){accountStatus=error.message;}
+ if(page==='games')draw();return;
+ }
+ if(e.target.id==='import'){if(importing)return;importing=true;const site=f.get('site'),name=f.get('username').trim();pref({site,username:name});notice='Reading completed games…';draw();try{if(site==='lichess'){await link(name);notice='Linked '+name+' for automatic game updates.';}else{const r=await importGames(site,name);notice=r.imported+' new games from '+r.found+' qualifying games.';}}catch(error){notice=error.message;}finally{importing=false;draw();void work();}}
  if(e.target.id==='newgame'){const format=f.get('format'),base=(format==='blitz'?5:10)*60000;pref({format});board=new Chess();orientation=f.get('side');selected=lastMove=null;flight++;busy=false;run={id:'practice-'+crypto.randomUUID(),side:orientation,format,inc:Number(f.get('inc')),skill:Number(f.get('skill')),times:{w:base,b:base},since:Date.now(),clockSide:'w',active:true};void advancePractice();}
 });
 setInterval(()=>{if(page==='practice'&&run?.active){if(run.times[run.clockSide]<=elapsed()){settleClock();draw();}else{if($('#cw'))$('#cw').textContent=clock('w');if($('#cb'))$('#cb').textContent=clock('b');}}},150);
 window.addEventListener('hashchange',route);
-await sync();if(!get('settings'))pref(settings());if(!games().length&&!attempts().length){diagnostic=true;card=library.find(c=>c.topic==='Openings');}route();void work();
+await sync();await startCloud();if(!get('settings'))pref(settings());if(!games().length&&!attempts().length){diagnostic=true;card=library.find(c=>c.topic==='Openings');}route();void work();
+startAccounts(message=>{
+ if(message)accountStatus=message;
+ if($('#account-status'))$('#account-status').textContent=accountStatus;
+},()=>{if(page==='games'&&!replay&&!document.activeElement?.closest('form'))draw();void work();});
