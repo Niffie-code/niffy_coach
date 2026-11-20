@@ -4,7 +4,7 @@ Start with games played under the competition time control. The coach keeps blit
 
 **Openings.** Review the most common lines from your imported games, select the ones you want to keep, then replay their decisions from your side. The engine can accept playable alternatives.
 
-**Calculation.** Enter the entire sequence when prompted. The review distinguishes your candidate move, the opponent’s reply and your continuation. Use **Play from here** to see what happens after the exercise.
+**Calculation and coached review.** Enter the entire sequence when prompted. Choose **Teach me this position** for an explanation. In a game replay, select any move and choose **Explain** to see its classification, the strongest reply, and a better candidate. Step through either line directly on the board. Classifications reflect a finite Stockfish search and can change with deeper analysis. The review distinguishes your candidate move, the opponent’s reply and your continuation. Use **Play from here** to see what happens after the exercise.
 
 **Competition week.** Set the daily time budget in **My week**. Use **Practice** for 5+0 or 10+0 games, with an optional increment. Resigned and completed practice games with moves enter your game library.
 

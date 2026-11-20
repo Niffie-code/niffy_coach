@@ -1,14 +1,17 @@
 import {Chess} from './vendor/chess.js';
-import {trainer,variation,playUci,sound} from './engine.js';
+import {trainer,playUci} from './engine.js';
 import {put,get,list,sync} from './store.js';
 import {subjects,library,games,attempts,personal,settings,cards,ranked,lineKey,importGames,analyze} from './coach.js';
 import {accounts,checkedAt,link,unlink,startAccounts} from './linked-accounts.js';
 import {startCloud} from './cloud.js';
+import {reviewMove} from './tutor.js';
 const $=s=>document.querySelector(s),esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let page='',topic='',card,board,orientation='w',selected,lastMove,flight=0,busy=false,stage=0,answers=[],report='',complete=false,usedHint=false,playout=false,run=null,notice='',analysisText='',processing=false,importing=false,paused=false,diagnostic=false;
+let studyEndFen=null,lineReturnFen=null,lesson=null,lineMode=null,reviewStatus='',reviewing=false;
+const reviewCache=new Map();
 const chosen=()=>settings().format;
 function pref(patch){put('settings',{...settings(),...patch});}
-function startCard(c){if(!c)return;flight++;busy=false;card=c;board=new Chess(c.fen);orientation=board.turn();selected=lastMove=null;answers=[];report='';usedHint=false;complete=playout=false;stage=0;}
+function startCard(c){if(!c)return;lesson=null;lineMode=null;reviewStatus='';flight++;busy=false;card=c;board=new Chess(c.fen);orientation=board.turn();selected=lastMove=null;answers=[];report='';usedHint=false;complete=playout=false;stage=0;}
 function next(){const pool=ranked(topic,chosen());startCard(pool.find(c=>c.id!==card?.id)||pool[0]);draw();}
 function scoreAttempt(pass){put('a:'+crypto.randomUUID(),{card:card.id,topic:card.topic,format:chosen(),time:Date.now(),pass:pass&&!usedHint,stages:answers.map(a=>a.good)});}
 function setHeading(k,t,s){$('#eyebrow').textContent=k;$('#title').textContent=t;$('#subtitle').textContent=s;}
@@ -18,13 +21,50 @@ function boardHTML(label,detail){let files='abcdefgh'.split(''),ranks=[8,7,6,5,4
  return '<section class="boardwrap"><div class="boardhead"><b>'+esc(label)+'</b><span>'+esc(detail)+'</span></div><div class="board" role="group" aria-label="Chessboard">'+ranks.flatMap((r,i)=>files.map((f,j)=>{const sq=f+r,p=board.get(sq),name=p?({w:'White',b:'Black'}[p.color]+' '+({k:'king',q:'queen',r:'rook',b:'bishop',n:'knight',p:'pawn'}[p.type])):'empty';return '<button class="sq '+((i+j)%2?'dark ':'')+(sq===selected?'active ':'')+(sq===lastMove?'last ':'')+(targets.includes(sq)?'legal':'')+'" data-square="'+sq+'" aria-label="'+sq+' '+name+'">'+(j===0?'<span>'+r+'</span>':'')+(p?'<img alt="" src="./vendor/'+p.color+p.type.toUpperCase()+'.svg">':'')+(i===7?'<i>'+f+'</i>':'')+'</button>'; })).join('')+'</div><p class="boardfoot">Select a piece, then its destination.</p></section>';}
 function button(action,label,primary=false){return '<button data-action="'+action+'" class="'+(primary?'primary':'')+'">'+esc(label)+'</button>';}
 function tabs(){return '<div class="tabs" aria-label="Study topic">'+['',...subjects].map(t=>'<button data-topic="'+t+'" class="'+(t===topic?'chosen':'')+'">'+(t||'For you')+'</button>').join('')+'</div>';}
+function reviewHTML(){
+ if(!lesson)return '';
+ const {label,summary,comparison,played,best,playedSan,bestSan,thinking}=lesson;
+ return '<section class="tutor"><h3>'+esc(label)+'</h3>'+(summary?'<p>'+esc(summary)+'</p>':'')+
+ '<p class="mini muted">'+esc(comparison)+'</p><p><strong>What happened</strong><br>'+esc(played)+'</p>'+
+ '<p><strong>What the engine recommends</strong><br>'+esc(best)+'</p>'+
+ '<p><strong>How to find it next time</strong><br>'+esc(thinking)+'</p>'+
+ '<div class="row">'+button('best-line','Show best line')+button('played-line','Show played line')+'</div>'+
+ (lineMode?'<p class="mini">'+esc(lesson[lineMode.key+'San'])+'</p><p>'+esc(lesson[lineMode.key+'Notes'][lineMode.index-1]||'Starting position')+'</p><div class="row">'+button('line-back','Previous ply')+button('line-next','Next ply')+button('line-close','Return to position')+'</div>':'')+'</section>';
+}
+function showLine(key,index){
+ if(!lineMode)lineReturnFen=board.fen();
+ const moves=lesson[key+'Line'];lineMode={key,index:Math.min(moves.length,Math.max(0,index))};
+ board=new Chess(lesson.fen);for(const code of moves.slice(0,lineMode.index))lastMove=playUci(board,code).to;
+ if(!lineMode.index)lastMove=null;selected=null;draw();
+}
+async function explainPosition(move,fromOriginal=false){
+ const id=flight,fen=fromOriginal?card.fen:board.fen(),game=replay?.id,ply=replayIndex;
+ const current=()=>id===flight&&(page==='study'?(fromOriginal?card.fen===fen:board.fen()===fen):replay?.id===game&&replayIndex===ply);
+ reviewing=true;reviewStatus='Calculating the strongest reply and alternatives…';draw();
+ try{
+ if(!move&&card?.game&&card.fen===fen&&page==='study'){
+ const game=get('g:'+card.game);
+ if(Number.isInteger(card.ply)&&game){const b=new Chess();b.loadPgn(game.pgn);move=b.history({verbose:true})[card.ply];}
+ }
+ const key=move?move.before+'|'+move.san:null;
+ let result=key&&reviewCache.get(key);
+ if(!result){
+ let candidate=move;
+ if(!candidate){const best=await trainer.search(fen,85000);if(!best.best)throw Error('This position has no legal moves.');candidate=playUci(new Chess(fen),best.best);}
+ result=await reviewMove(trainer,candidate,350000,true);
+ if(key){if(reviewCache.size>=60)reviewCache.delete(reviewCache.keys().next().value);reviewCache.set(key,result);}
+ }
+ if(current()){lesson=result;reviewStatus='';}
+ }catch(error){if(current())reviewStatus=error.message;}
+ finally{reviewing=false;if(page==='study'||(page==='games'&&replay))draw();}
+}
 function study(){
  if(!card)startCard(ranked(topic,chosen())[0]);
  setHeading('Training room','Position study','Calculate on the board, test your idea, then revisit what you missed.');
  const g=card.game&&get('g:'+card.game);
  return tabs()+'<div class="layout">'+boardHTML(playout?'Play the position':card.topic,board.turn()==='w'?'White to move':'Black to move')+'<div><article class="panel"><small>'+esc(diagnostic?'Diagnostic · '+(subjects.indexOf(card.topic)+1)+' of 4':(g?g.format+' · Your game':'Benchmark position'))+'</small><h2>'+esc(card.title)+'</h2><p>'+esc(card.goal)+'</p>'+(g?'<p class="mini muted">'+esc(g.white+' vs '+g.black+' · '+new Date(g.date).toLocaleDateString())+'</p>':'')+'<div role="status">'+(report?'<p class="feedback">'+esc(report)+'</p>':'')+(busy?'<p>Checking the position…</p>':'')+'</div>'+
- (complete?'<p>'+esc(card.idea)+'</p><div class="row">'+button('next',diagnostic?'Continue diagnostic':'Next position',true)+button('retry','Retry')+button('playout','Play from here')+'</div>':playout?button('retry','Restart study'):('<p><strong>'+['Choose your candidate move.','Predict the opponent’s best reply.','Play your continuation.'][stage]+'</strong></p><div class="row">'+button('hint','Show hint')+button('retry','Reset position')+'</div>'))+
- '</article><div class="card"><small>Training focus</small><div class="row"><label>Time control<select id="format">'+option('blitz','5-minute blitz',chosen())+option('rapid','10-minute rapid',chosen())+'</select></label>'+button('diagnostic','Four-position diagnostic')+'</div>'+(!personal().length?'<p class="mini"><a href="#games"><u>Import your games</u></a> to train on your own decisions.</p>':'')+'</div></div></div>';
+ (complete?'<p>'+esc(card.idea)+'</p>'+reviewHTML()+'<div class="row">'+button('next',diagnostic?'Continue diagnostic':'Next position',true)+button('retry','Retry')+(g&&Number.isInteger(card.ply)?button('original','Explain my original move'):'')+button('playout','Play from here')+'</div>':playout?button('retry','Restart study'):('<p><strong>'+['Choose your candidate move.','Predict the opponent’s best reply.','Play your continuation.'][stage]+'</strong></p><div class="row">'+button('hint','Show hint')+button('explain','Teach me this position')+button('retry','Reset position')+'</div>'))+
+ (!complete?reviewHTML():'')+(reviewStatus?'<p role="status">'+esc(reviewStatus)+'</p>':'')+'</article><div class="card"><small>Training focus</small><div class="row"><label>Time control<select id="format">'+option('blitz','5-minute blitz',chosen())+option('rapid','10-minute rapid',chosen())+'</select></label>'+button('diagnostic','Four-position diagnostic')+'</div>'+(!personal().length?'<p class="mini"><a href="#games"><u>Import your games</u></a> to train on your own decisions.</p>':'')+'</div></div></div>';
 }
 async function submitMove(m){
  if(page==='practice'){settleClock();if(!run.active){draw();return;}}
@@ -33,16 +73,16 @@ async function submitMove(m){
  busy=true;draw();
  try{
  if(playout){if(!board.isGameOver()){const e=await trainer.search(board.fen(),15000);if(id!==flight)return;playUci(board,e.best);}report=board.isGameOver()?'Position complete.':'Continue against the engine.';return;}
- const best=await trainer.search(before,32000),played=m.from+m.to+(m.promotion||''),after=await trainer.search(board.fen(),32000);if(id!==flight)return;
- const constrained=played===best.best?best:await trainer.search(before,32000,{only:played});if(id!==flight)return;
- const good=played===best.best||sound(best.score,Math.min(constrained.score,-after.score));
- answers.push({good,move:m.san,best:variation(before,best.pv.slice(0,3))});
- if(stage+1<(card.plies||1)&&!board.isGameOver()){stage++;report='';}
- else{complete=true;const passed=answers.every(a=>a.good);scoreAttempt(passed);report=answers.map((a,i)=>['Candidate','Reply','Continuation'][i]+' '+a.move+' — '+(a.good?'sound':'compare '+a.best)).join('. ')+'.';}
+ const feedback=await reviewMove(trainer,m,85000,true);if(id!==flight)return;
+ const good=['Best move','Critical move','Brilliant sacrifice','Excellent move','Good move'].includes(feedback.label);
+ answers.push({good,move:m.san,best:feedback.bestSan,feedback});
+ lesson=answers.find(a=>!a.good)?.feedback||feedback;
+ if(stage+1<(card.plies||1)&&!board.isGameOver()){stage++;report='';lesson=null;}
+ else{complete=true;studyEndFen=board.fen();const passed=answers.every(a=>a.good);scoreAttempt(passed);report=answers.map((a,i)=>['Candidate','Reply','Continuation'][i]+' '+a.move+' — '+(a.good?'sound':'compare '+a.best)).join('. ')+'.';}
  }catch(e){if(id===flight){board.undo();report=e.message;}}finally{if(id===flight){busy=false;draw();}}
 }
 function clickSquare(sq){
- if(busy||(page==='study'&&(complete||board.isGameOver()))||(page==='practice'&&(!run?.active||board.turn()!==run.side)))return;
+ if(busy||reviewing||lineMode||(page==='study'&&(complete||board.isGameOver()))||(page==='practice'&&(!run?.active||board.turn()!==run.side)))return;
  const piece=board.get(sq);
  if(selected){const choices=board.moves({square:selected,verbose:true}).filter(m=>m.to===sq);if(choices.length){let m=choices[0];if(choices.length>1){const choice=prompt('Promote to q, r, b, or n','q');m=choices.find(x=>x.promotion===choice?.toLowerCase());if(!m)return;}void submitMove(m);return;}}
  selected=piece?.color===board.turn()&&selected!==sq?sq:null;draw();
@@ -53,9 +93,9 @@ function gamesPage(){
  const gs=games(),lines=[...new Set(gs.filter(g=>g.pgn).map(lineKey))];
  return '<div class="panel"><h2>Linked Lichess accounts</h2><p>Add each username once to analyze up to 100 recent rapid games and 100 recent blitz games. New games are checked while the coach is open.</p><form id="link-lichess" class="row"><label>Lichess username<input required name="handle" minlength="2" maxlength="30" autocomplete="off"></label><button class="primary">Add username</button></form>'+accounts().map(a=>'<div class="listitem">'+esc(a.name)+(checkedAt(a.name)?' · Checked '+esc(new Date(checkedAt(a.name)).toLocaleString()):'')+' <button data-unlink="'+esc(a.name)+'">Remove</button></div>').join('')+'<p id="account-status" role="status">'+esc(accountStatus)+'</p></div><div class="cols"><div class="panel"><h2>Import games</h2><form id="import"><div class="row"><label>Platform<select name="site">'+option('chesscom','Chess.com',settings().site)+option('lichess','Lichess',settings().site)+'</select></label><label>Username<input type="text" name="username" required pattern="[A-Za-z0-9_-]{1,40}" value="'+esc(settings().username||'')+'"></label></div><p><button class="primary" '+(importing?'disabled':'')+'>'+(importing?'Importing…':'Import recent games')+'</button></p></form><p role="status">'+esc(notice)+'</p></div><div class="panel"><h2>Your repertoire</h2><p class="mini">Select the lines you want to keep in opening practice.</p>'+lines.map(l=>'<label style="display:block"><input type="checkbox" data-rep="'+esc(l)+'" '+(!settings().excluded?.includes(l)?'checked':'')+'> '+esc(l)+'</label>').join('')+(!lines.length?'<p class="muted">Your lines will appear after your first game.</p>':'')+'</div></div><div class="panel"><h2>Completed games</h2><p>'+['rapid','blitz'].map(format=>{const group=gs.filter(g=>g.format===format);return format+' · '+group.filter(g=>g.analyzed).length+' of '+group.length+' analyzed';}).join(' &nbsp; | &nbsp; ')+'</p><p id="analysis" role="status">'+esc(analysisText)+'</p>'+(!gs.length?'<p>Start with an online import or <a href="#practice"><u>play a timed game</u></a>.</p>':'')+gs.map(g=>'<div class="listitem"><strong>'+esc(g.white+' vs '+g.black)+'</strong><div class="mini">'+esc(g.format+' · '+new Date(g.date).toLocaleDateString()+' · '+g.result)+'</div>'+(g.critical?'<button data-card="'+esc(g.critical)+'">Review first critical decision</button>':g.analyzed?'Analysis complete':'Queued for analysis')+' <button data-replay="'+esc(g.id)+'">Replay game</button></div>').join('')+'</div>';
 }
-async function work(){if(processing||paused||run?.active)return;processing=true;try{while(!run?.active&&!paused){const g=games().find(game=>!game.analyzed);if(!g)break;await analyze(g,(i,n)=>{analysisText='Analyzing '+g.white+' vs '+g.black+' · ply '+i+' of '+n;if($('#analysis'))$('#analysis').textContent=analysisText;});if(page==='games')draw();}analysisText='';}catch(e){analysisText=e.message+' Open Games to retry.';}finally{processing=false;if(page==='games')draw();}}
+async function work(){if(processing||paused||run?.active)return;processing=true;try{while(!run?.active&&!paused){const g=games().find(game=>!game.analyzed);if(!g)break;await analyze(g,(i,n)=>{analysisText='Analyzing '+g.white+' vs '+g.black+' · ply '+i+' of '+n;if($('#analysis'))$('#analysis').textContent=analysisText;});if(page==='games'&&!replay)draw();}analysisText='';}catch(e){analysisText=e.message+' Open Games to retry.';}finally{processing=false;if(page==='games'&&!replay)draw();}}
 let replay=null,replayIndex=0;
-function replayPage(){const b=new Chess();b.loadPgn(replay.pgn);const history=b.history({verbose:true});board=new Chess(replayIndex?history[replayIndex-1].after:history[0].before);orientation=replay.side;selected=null;lastMove=history[replayIndex-1]?.to;setHeading('Game review',replay.white+' vs '+replay.black,'Replay the game and jump to decisions selected by the coach.');return '<div class="layout">'+boardHTML('Game replay','Ply '+replayIndex+' / '+history.length)+'<div class="panel"><h2>Move list</h2><div class="row">'+button('back','Previous')+button('forward','Next')+button('close','Game library')+'</div><p>'+history.map((m,i)=>'<button data-ply="'+(i+1)+'">'+(m.color==='w'?m.before.split(' ').pop()+'. ':'')+esc(m.san)+'</button>').join(' ')+'</p>'+personal().filter(c=>c.game===replay.id).map(c=>'<p><button data-card="'+c.id+'">'+esc(c.title)+'</button></p>').join('')+'</div></div>';}
+function replayPage(){const b=new Chess();b.loadPgn(replay.pgn);const history=b.history({verbose:true});if(!lineMode){board=new Chess(replayIndex?history[replayIndex-1].after:history[0].before);lastMove=history[replayIndex-1]?.to;}orientation=replay.side;selected=null;setHeading('Game review',replay.white+' vs '+replay.black,'Replay the game and jump to decisions selected by the coach.');return '<div class="layout">'+boardHTML('Game replay','Ply '+replayIndex+' / '+history.length)+'<div class="panel"><h2>Move list</h2><div class="row">'+button('back','Previous')+button('forward','Next')+button('close','Game library')+'</div>'+(replayIndex?'<p>'+button('explain','Explain '+history[replayIndex-1].san,true)+'</p>':'<p>Select a move for a coached review.</p>')+(reviewStatus?'<p role="status">'+esc(reviewStatus)+'</p>':'')+reviewHTML()+'<p>'+history.map((m,i)=>'<button data-ply="'+(i+1)+'">'+(m.color==='w'?m.before.split(' ').pop()+'. ':'')+esc(m.san)+'</button>').join(' ')+'</p>'+personal().filter(c=>c.game===replay.id).map(c=>'<p><button data-card="'+c.id+'">'+esc(c.title)+'</button></p>').join('')+'</div></div>';}
 function dayOfCamp(){const start=new Date(settings().start+'T00:00:00');return Math.max(1,Math.min(7,1+Math.round((new Date(new Date().toDateString())-start)/86400000)))||1;}
 function openingRecall(){
  const records=attempts().sort((a,b)=>b.time-a.time),lines=new Map();
@@ -88,7 +128,7 @@ function draw(){const el=$('#content');el.innerHTML=page==='study'?study():page=
 function route(){
  const nextPage=['games','practice','week'].includes(location.hash.slice(1))?location.hash.slice(1):'study';
  if(run?.active&&nextPage!=='practice'){if(!confirm('Resign the current practice game and leave?')){location.hash='practice';return;}finish(run.side==='w'?'0-1':'1-0','Resigned');}
- if(page===nextPage)return;flight++;busy=false;selected=null;page=nextPage;replay=null;
+ if(page===nextPage)return;flight++;busy=false;selected=null;page=nextPage;replay=null;lesson=null;lineMode=null;reviewStatus='';
  if(page==='study')startCard(card||ranked(topic,chosen())[0]);if(page==='practice'){run=null;board=new Chess();}
  document.querySelectorAll('nav a').forEach(a=>{if(a.hash==='#'+page)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current');});draw();if(page==='games')void work();
 }
@@ -98,12 +138,25 @@ document.addEventListener('click',e=>{const el=e.target.closest('button');if(!el
  if(d.square){if(page==='study'||page==='practice')clickSquare(d.square);return;}
  if(d.topic!==undefined){topic=d.topic;diagnostic=false;startCard(ranked(topic,chosen())[0]);draw();return;}
  if(d.card){diagnostic=false;topic='';openCard(cards().find(c=>c.id===d.card));return;}
- if(d.replay){replay=get('g:'+d.replay);replayIndex=0;draw();return;}
- if(d.ply){replayIndex=Number(d.ply);draw();return;}
+ if(d.replay){lesson=null;lineMode=null;reviewStatus='';replay=get('g:'+d.replay);replayIndex=0;draw();return;}
+ if(d.ply){lesson=null;lineMode=null;reviewStatus='';replayIndex=Number(d.ply);draw();return;}
  switch(d.action){
+ case 'explain':{
+  if(reviewing||busy)break;
+  let move;
+  if(replay){const b=new Chess();b.loadPgn(replay.pgn);move=b.history({verbose:true})[replayIndex-1];}
+  else usedHint=true;
+  void explainPosition(move);break;
+ }
+ case 'original':if(!reviewing){lineMode=null;void explainPosition(undefined,true);}break;
+ case 'best-line':showLine('best',1);break;
+ case 'played-line':showLine('played',1);break;
+ case 'line-next':showLine(lineMode.key,lineMode.index+1);break;
+ case 'line-back':showLine(lineMode.key,lineMode.index-1);break;
+ case 'line-close':{const fen=lesson.fen;lineMode=null;if(page==='study'){board=new Chess(lineReturnFen||studyEndFen||fen);lastMove=null;}draw();break;}
  case 'next':if(diagnostic){const i=subjects.indexOf(card.topic)+1;if(i<4){startCard(library.find(c=>c.topic===subjects[i]));draw();break;}diagnostic=false;location.hash='week';}else next();break;
  case 'retry':startCard(card);draw();break;
- case 'hint':usedHint=true;report='Study the idea: '+card.idea;draw();break;
+ case 'hint':usedHint=true;if(card.game){void explainPosition();}else{report='Study the idea: '+card.idea;draw();}break;
  case 'playout':startCard(card);playout=true;report='Play your side against the engine.';draw();break;
  case 'diagnostic':diagnostic=true;topic='';openCard(library.find(c=>c.topic===subjects[0]));break;
  case 'daily':{
@@ -115,16 +168,16 @@ document.addEventListener('click',e=>{const el=e.target.closest('button');if(!el
  const due=pool.find(c=>history.find(a=>a.card===c.id)?.pass===false);
  openCard(diagnostic?library.find(c=>c.topic===subjects[0]):due||pool[0]);break;}
  case 'resign':if(confirm('Resign this training game?')){finish(run.side==='w'?'0-1':'1-0','Resigned');draw();}break;
- case 'forward':{const b=new Chess();b.loadPgn(replay.pgn);replayIndex=Math.min(b.history().length,replayIndex+1);draw();break;}
- case 'back':replayIndex=Math.max(0,replayIndex-1);draw();break;
- case 'close':replay=null;draw();break;}
+ case 'forward':{lesson=null;lineMode=null;reviewStatus='';const b=new Chess();b.loadPgn(replay.pgn);replayIndex=Math.min(b.history().length,replayIndex+1);draw();break;}
+ case 'back':lesson=null;lineMode=null;reviewStatus='';replayIndex=Math.max(0,replayIndex-1);draw();break;
+ case 'close':lesson=null;lineMode=null;reviewStatus='';replay=null;draw();break;}
 });
 document.addEventListener('change',e=>{const el=e.target;if(el.id==='format'){pref({format:el.value});startCard(ranked(topic,chosen())[0]);draw();}if(el.id==='minutes'&&el.checkValidity()){pref({minutes:Number(el.value)});draw();}if(el.dataset.rep){const set=new Set(settings().excluded||[]);el.checked?set.delete(el.dataset.rep):set.add(el.dataset.rep);pref({excluded:[...set]});}});
 document.addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(e.target);
  if(e.target.id==='link-lichess'){
  const name=String(f.get('handle')).trim();
  try{const result=link(name);accountStatus='Checking '+name+'…';draw();await result;}catch(error){accountStatus=error.message;}
- if(page==='games')draw();return;
+ if(page==='games'&&!replay)draw();return;
  }
  if(e.target.id==='import'){if(importing)return;importing=true;const site=f.get('site'),name=f.get('username').trim();pref({site,username:name});notice='Reading completed games…';draw();try{if(site==='lichess'){await link(name);notice='Linked '+name+' for automatic game updates.';}else{const r=await importGames(site,name);notice=r.imported+' new games from '+r.found+' qualifying games.';}}catch(error){notice=error.message;}finally{importing=false;draw();void work();}}
  if(e.target.id==='newgame'){const format=f.get('format'),base=(format==='blitz'?5:10)*60000;pref({format});board=new Chess();orientation=f.get('side');selected=lastMove=null;flight++;busy=false;run={id:'practice-'+crypto.randomUUID(),side:orientation,format,inc:Number(f.get('inc')),skill:Number(f.get('skill')),times:{w:base,b:base},since:Date.now(),clockSide:'w',active:true};void advancePractice();}

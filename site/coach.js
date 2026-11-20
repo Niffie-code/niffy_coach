@@ -1,3 +1,4 @@
+import {reviewMove} from './tutor.js';
 import {Chess} from './vendor/chess.js';
 import {analyst,variation} from './engine.js';
 import {get,list,put} from './store.js';
@@ -76,10 +77,13 @@ export async function analyze(g,onProgress=()=>{}){
  const phase=classify(m.before,i),b=new Chess(m.before),bestSan=variation(m.before,[deeper.best]);
  const tactical=!!(b.isCheck()||/[x+#]/.test(bestSan)||/[x+#]/.test(variation(m.after,after.pv.slice(0,1))));
  const topic=tactical&&phase!=='Openings'?'Tactics':phase;
- result.push({id:g.id+'-'+i,game:g.id,fen:m.before,side:g.side,topic,title:'Revisit move '+m.before.split(' ').pop()+' against '+(g.side==='w'?g.black:g.white),goal:'Find a candidate and calculate the opponent’s strongest response.',idea:'In the game you played '+m.san+'. Compare the reply '+variation(m.after,after.pv.slice(0,3))+' with '+variation(m.before,deeper.pv.slice(0,4))+'.',move:bestSan,plies:topic==='Tactics'?3:1,loss:confirmed,ply:i,rep:phase==='Openings'?lineKey(g):null});
+ result.push({id:g.id+'-'+i,game:g.id,fen:m.before,side:g.side,topic,title:'Revisit move '+m.before.split(' ').pop()+' against '+(g.side==='w'?g.black:g.white),goal:'Try a move, or select Teach me this position for the coach’s explanation and a replay of both lines.',idea:'In the game you played '+m.san+'. Compare the reply '+variation(m.after,after.pv.slice(0,3))+' with '+variation(m.before,deeper.pv.slice(0,4))+'.',move:bestSan,plies:topic==='Tactics'?3:1,loss:confirmed,ply:i,rep:phase==='Openings'?lineKey(g):null});
  }
  const selected=[...new Map([result[0],...result.sort((a,b)=>b.loss-a.loss).slice(0,3)].filter(Boolean).map(x=>[x.id,x])).values()];
- for(const c of selected)put('d:'+c.id,c);
+ for(const c of selected){
+ const review=await reviewMove(analyst,moves[c.ply],45000,true);
+ put('d:'+c.id,{...c,idea:review.best+' '+review.thinking});
+}
  if(moves.length>=6){const m=moves.filter(m=>m.color===g.side)[2];const b=new Chess(m.before),s=await analyst.search(m.before,16000);put('d:'+g.id+'-rep',{id:g.id+'-rep',game:g.id,topic:'Openings',title:g.opening||'Your opening repertoire',fen:m.before,move:variation(b.fen(),[s.best]),rep:lineKey(g),goal:'Recall your move, then check how the opponent can challenge it.',idea:'You played '+m.san+' here. Compare that choice with the engine continuation '+variation(m.before,s.pv.slice(0,4))+'.'});}
  put('g:'+g.id,{...g,analyzed:true,critical:selected[0]?.id});
 }

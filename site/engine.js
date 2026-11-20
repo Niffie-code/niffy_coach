@@ -8,12 +8,12 @@ export class Engine{
   const game=new Chess(fen);
   if(game.isGameOver())return {score:game.isCheckmate()?-99999:0,pv:[],best:null};
   if(!this.worker){this.worker=new Worker(new URL('./vendor/stockfish.js',import.meta.url));try{await this.command(['uci'],'uciok');}catch(e){this.reset();throw e;}}
-  let score=0,pv=[];
+  let score=null,pv=[];
   try{await this.command(['setoption name Skill Level value '+skill,'isready'],'readyok');
   const end=await this.command(['position fen '+fen,'go nodes '+nodes+(only?' searchmoves '+only:'')],'bestmove',line=>{
     const match=line.match(/score (cp|mate) (-?\d+).*? pv (.+)/);
-    if(match){const n=Number(match[2]);score=match[1]==='cp'?n:Math.sign(n)*(100000-Math.abs(n));pv=match[3].trim().split(/\s+/);}
-  });return {score,pv,best:end.split(' ')[1]};}catch(e){this.reset();throw e;}
+    if(match&&!/\b(?:upperbound|lowerbound)\b/.test(line)){const n=Number(match[2]);score=match[1]==='cp'?n:Math.sign(n)*(100000-Math.abs(n));pv=match[3].trim().split(/\s+/);}
+  });if(score===null)throw Error('Engine did not finish an evaluation. Please retry.');return {score,pv,best:end.split(' ')[1]};}catch(e){this.reset();throw e;}
  }
  reset(){this.worker?.terminate();this.worker=null;}
  command(commands,end,read=()=>{}){return new Promise((resolve,reject)=>{

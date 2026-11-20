@@ -19,11 +19,13 @@ const script=async()=>{
  step='calculate knight fork';click('[data-topic="Tactics"]');
  for(const [from,to] of [['e4','f6'],['g8','g7'],['f6','d7']]){click('[data-square="'+from+'"]');click('[data-square="'+to+'"]');await wait(()=>!document.querySelector('#content').innerText.includes('Checking the position')); }
  await wait(()=>document.querySelector('[data-action="next"]'));if(!document.querySelector('.feedback').textContent.includes('Continuation'))throw Error('Missing calculation feedback');
+ if(!document.body.innerText.includes('How to find it next time'))throw Error('Missing coach explanation');
+ click('[data-action="best-line"]');click('[data-action="line-next"]');click('[data-action="line-close"]');
  step='import';location.hash='games';await wait(()=>document.querySelector('#import'));document.querySelector('[name="site"]').value='lichess';document.querySelector('[name="username"]').value='tempoqa';document.querySelector('#import').requestSubmit();
  await wait(()=>document.querySelector('[data-card]'));click('[data-card]');await wait(()=>location.hash==='#study'&&document.body.innerText.includes('Rival'));
  step='timed practice';location.hash='practice';await wait(()=>document.querySelector('#newgame'));document.querySelector('#newgame').requestSubmit();click('[data-square="e2"]');click('[data-square="e4"]');await wait(()=>document.querySelector('[data-square="b8"]').getAttribute('aria-label').includes('empty')||!document.querySelector('[data-square="e7"]').getAttribute('aria-label').includes('pawn')||document.querySelectorAll('.last').length&&document.querySelector('.last').dataset.square!=='e4');
  window.confirm=()=>true;click('[data-action="resign"]');await wait(()=>document.body.innerText.includes('Resigned'));
- step='replay';location.hash='games';await wait(()=>document.querySelector('[data-replay]'));click('[data-replay]');click('[data-action="forward"]');await wait(()=>document.body.innerText.includes('Ply 1 /'));
+ step='replay';location.hash='games';await wait(()=>document.querySelector('[data-replay]'));click('[data-replay]');click('[data-action="forward"]');await wait(()=>document.body.innerText.includes('Ply 1 /'));click('[data-action="explain"]');await wait(()=>document.body.innerText.includes('How to find it next time'));
  location.hash='week';await wait(()=>document.body.innerText.includes('Recall by format'));await fetch('/result',{method:'POST',body:'pass'});
  }catch(e){await fetch('/result',{method:'POST',body:step+' '+String(e)});}
 };
