@@ -29,3 +29,11 @@ jobs:
       - name: Deploy
         id: deploy
         uses: actions/deploy-pages@v4
+      - name: Verify published board and engine
+        env:
+          SITE_URL: ${{ steps.deploy.outputs.page_url }}
+        run: |
+          curl --fail --retry 6 --retry-all-errors --max-time 30 "${SITE_URL%/}/?release=${GITHUB_SHA}" -o /tmp/niffy-index.html
+          grep -F '<title>niffy_coach' /tmp/niffy-index.html
+          curl --fail --retry 6 --retry-all-errors --max-time 45 "${SITE_URL%/}/vendor/stockfish.wasm" -o /tmp/niffy-stockfish.wasm
+          cmp site/vendor/stockfish.wasm /tmp/niffy-stockfish.wasm
