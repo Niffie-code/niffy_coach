@@ -32,26 +32,34 @@ export function ranked(topic,format){
  const score=Math.min(3,related)*0.8+(c.game?2:0)+(c.loss?Math.min(3,c.loss/140):0)+weakness*3+(last?(last.pass?-6:age>.25?7:1):-0.1)+(age<.01?-12:0)+(c.game&&Date.now()-(get('g:'+c.game)?.date||0)<7*864e5?2:0);
  return {c,score};}).sort((a,b)=>b.score-a.score).map(x=>x.c);
 }
-export function lineKey(g){const b=new Chess();b.loadPgn(g.pgn);return g.side+' · '+b.history().slice(0,6).join(' ');}
+const openings=new Map();
+export function lineKey(g){const cached=openings.get(g.id);if(cached?.pgn===g.pgn&&cached.side===g.side)return cached.line;const b=new Chess();b.loadPgn(g.pgn);const line=g.side+' · '+b.history().slice(0,6).join(' ');openings.set(g.id,{pgn:g.pgn,side:g.side,line});return line;}
 function pack(id,pgn,name,format,date,opening,side){
  const b=new Chess();b.loadPgn(pgn);if(!b.history().length)return null;
  return {id,pgn,side:side||((b.getHeaders().White||'').toLowerCase()===name.toLowerCase()?'w':'b'),format,date,opening:opening||'',white:b.getHeaders().White||'White',black:b.getHeaders().Black||'Black',result:b.getHeaders().Result||'*'};
 }
+export const historyPerFormat=100;
 export async function importGames(site,name,since=0){
- const req=async(month='')=>{const user=encodeURIComponent(name.trim()); const url=site==='lichess'?'https://lichess.org/api/games/user/'+user+'?perfType=blitz,rapid&moves=true&opening=true&clocks=false&'+(since?'since='+since:'max=30'):'https://api.chess.com/pub/player/'+user.toLowerCase()+'/games/'+(month||'archives');const res=await fetch(url,{headers:{Accept:site==='lichess'?'application/x-ndjson':'application/json'}});if(!res.ok){const error=Error(res.status===429?'The provider asked us to wait before checking again.':'Could not read that account. Check its spelling or try again later.');error.status=res.status;error.retryAfter=Number(res.headers.get('Retry-After')||0)*1000;throw error;}return res;};
+ const req=async(month='',format='blitz,rapid')=>{const user=encodeURIComponent(name.trim()); const url=site==='lichess'?'https://lichess.org/api/games/user/'+user+'?perfType='+format+'&moves=true&opening=true&clocks=false&'+(since?'since='+since:'max='+historyPerFormat):'https://api.chess.com/pub/player/'+user.toLowerCase()+'/games/'+(month||'archives');const res=await fetch(url,{headers:{Accept:site==='lichess'?'application/x-ndjson':'application/json'}});if(!res.ok){const error=Error(res.status===429?'The provider asked us to wait before checking again.':'Could not read that account. Check its spelling or try again later.');error.status=res.status;error.retryAfter=Number(res.headers.get('Retry-After')||0)*1000;throw error;}return res;};
  let imported=0,found=0;
+ const counts={rapid:0,blitz:0};
+ const enough=()=>counts.rapid>=historyPerFormat&&counts.blitz>=historyPerFormat;
  function add(g){if(g){found++;if(!get('g:'+g.id)){put('g:'+g.id,g);imported++;}}}
  if(site==='lichess'){
- const raw=await (await req()).text();
+ for(const format of since?['blitz,rapid']:['rapid','blitz']){
+ const raw=await (await req('',format)).text();
  for(const line of raw.trim().split('\n').filter(Boolean)){const r=JSON.parse(line);if(r.variant!=='standard'||['started','created','aborted'].includes(r.status)||!r.moves)continue;
+ if(!['rapid','blitz'].includes(r.speed)||(!since&&r.speed!==format))continue;
+ if(get('g:li-'+r.id)){found++;continue;}
  const b=new Chess();for(const m of r.moves.split(' '))b.move(m);
- const white=r.players.white.user?.name||'White',black=r.players.black.user?.name||'Black';b.header('White',white,'Black',black,'Result',r.winner?(r.winner==='white'?'1-0':'0-1'):'1/2-1/2');add(pack('li-'+r.id,b.pgn(),name,r.speed,r.lastMoveAt,r.opening?.name));}
+ const white=r.players.white.user?.name||'White',black=r.players.black.user?.name||'Black';b.header('White',white,'Black',black,'Result',r.winner?(r.winner==='white'?'1-0':'0-1'):'1/2-1/2');add(pack('li-'+r.id,b.pgn(),name,r.speed,r.lastMoveAt,r.opening?.name));}}
  }else{
  const archives=(await (await req()).json()).archives||[];
  for(const url of archives.reverse()){const month=url.match(/\d{4}\/\d{2}$/)?.[0];if(!month)continue;
  const rows=(await (await req(month)).json()).games||[];
- for(const r of rows.reverse()){if(r.rules!=='chess'||!['rapid','blitz'].includes(r.time_class)||!r.pgn)continue;
- add(pack('cc-'+r.url.split('/').pop(),r.pgn,name,r.time_class,r.end_time*1000,r.eco?.split('/').pop()?.replaceAll('-',' ')));if(found>=30)break;}if(found>=30)break;}
+ for(const r of rows.reverse()){if(r.rules!=='chess'||!['rapid','blitz'].includes(r.time_class)||!r.pgn||counts[r.time_class]>=historyPerFormat)continue;
+ counts[r.time_class]++;
+ add(pack('cc-'+r.url.split('/').pop(),r.pgn,name,r.time_class,r.end_time*1000,r.eco?.split('/').pop()?.replaceAll('-',' ')));if(enough())break;}if(enough())break;}
  }return {found,imported};
 }
 function classify(fen,ply){const men=fen.split(' ')[0].replace(/[^a-z]/gi,'').length;return men<=10?'Endgames':ply<16?'Openings':'Middlegames';}

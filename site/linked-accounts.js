@@ -1,8 +1,8 @@
 import {get,list,put} from './store.js';
-import {importGames} from './coach.js';
+import {historyPerFormat,importGames} from './coach.js';
 const interval=15*60*1000;
 let checking=false,rerun=false,onUpdate=()=>{},onGames=()=>{};
-const stamp=name=>(localStorage.getItem('niffy_coach.profile.v1.active')||'niffy_coach.profile.v1')+'.lichess.'+name.toLowerCase();
+const stamp=name=>(localStorage.getItem('niffy_coach.profile.v1.active')||'niffy_coach.profile.v1')+'.lichess.'+historyPerFormat+'.'+name.toLowerCase();
 const failures=new Map();
 export const checkedAt=name=>Number(localStorage.getItem(stamp(name)))||0;
 const retryKey='niffy.lichess.retryAt';

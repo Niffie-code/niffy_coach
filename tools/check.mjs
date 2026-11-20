@@ -13,6 +13,18 @@ globalThis.fetch=async url=>{assert.equal(new URL(url).hostname,'lichess.org');r
 assert.equal((await importGames('lichess','example')).imported,1);
 assert.equal((await importGames('lichess','example')).imported,0);
 assert.equal(get('g:li-fixture').side,'w');
+// A blitz-heavy history must still supply the full rapid sample.
+const chessGame=(format,i)=>({url:'https://www.chess.com/game/live/'+format+i,rules:'chess',time_class:format,pgn:'[White "example"]\n[Black "opponent"]\n\n1. e4 e5 *',end_time:i+1});
+const monthRequests=[];
+globalThis.fetch=async url=>{
+ if(url.endsWith('/archives'))return Response.json({archives:['https://api.chess.com/2025/01','https://api.chess.com/2025/02']});
+ const format=url.endsWith('/02')?'blitz':'rapid';monthRequests.push(format);
+ return Response.json({games:Array.from({length:105},(_,i)=>chessGame(format,i))});
+};
+assert.equal((await importGames('chesscom','example')).imported,200);
+assert.deepEqual(monthRequests,['blitz','rapid']);
+for(const format of ['blitz','rapid']){assert.ok(get('g:cc-'+format+'104'));assert.ok(get('g:cc-'+format+'5'));assert.equal(get('g:cc-'+format+'4'),undefined);}
+assert.equal((await importGames('chesscom','example')).imported,0);
 const exported=backup();mem.clear();restore(exported);assert.equal(get('g:li-fixture').black,'opponent');
 put('settings',{minutes:25});restore(exported);assert.equal(get('settings').minutes,25);
 assert.throws(()=>restore('{"bad":{}}'));
