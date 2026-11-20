@@ -1,0 +1,4 @@
+Chessboard pieces by Cburnett, distributed by lichess.org under CC BY-SA 3.0. https://github.com/lichess-org/lila/tree/master/public/piece/cburnett
+https://creativecommons.org/licenses/by-sa/3.0/
+Stockfish.js 17.1 by Chess.com and Stockfish contributors, GPLv3. Corresponding source and build instructions: https://github.com/nmrugg/stockfish.js/tree/v17.1.0 and https://www.npmjs.com/package/stockfish/v/17.1.0
+Chess.js 1.4.0 by Jeff Hlywa and contributors, BSD-2-Clause. License files relative to this document: vendor/chess-LICENSE and vendor/stockfish-COPYING.
